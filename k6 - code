@@ -1,0 +1,103 @@
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+function toBase64(str) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let output = '';
+    let i = 0;
+
+    while (i < str.length) {
+        let a = str.charCodeAt(i++) || 0;
+        let b = str.charCodeAt(i++) || 0;
+        let c = str.charCodeAt(i++) || 0;
+
+        let b1 = (a >> 2) & 0x3F;
+        let b2 = ((a & 0x3) << 4) | ((b >> 4) & 0xF);
+        let b3 = ((b & 0xF) << 2) | ((c >> 6) & 0x3);
+        let b4 = c & 0x3F;
+
+        if (!b) {
+            b3 = b4 = 64;
+        } else if (!c) {
+            b4 = 64;
+        }
+
+        output += chars[b1] + chars[b2] + chars[b3] + chars[b4];
+    }
+
+    return output;
+}
+
+export let options = {
+    ext: {
+        loadimpact: {
+            distribution: {
+                australia: { loadZone: 'amazon:au:sydney', percent: 100 }
+            }
+        }
+    },
+    scenarios: {
+        /*
+        load_homepage: {
+            executor: 'constant-arrival-rate',
+            rate: 100,
+            timeUnit: '1s',
+            duration: '10s',
+            preAllocatedVUs: 100,
+            exec: 'load_homepage'
+        },
+        
+        load_address: {
+            executor: 'constant-arrival-rate',
+            rate: 30,
+            timeUnit: '1s',
+            duration: '10s',
+            preAllocatedVUs: 30,
+            exec: 'load_address'
+        },
+        */
+        ramping_homepage: {
+            executor: 'ramping-arrival-rate',
+            startRate: 50,
+            timeUnit: '1s',
+            preAllocatedVUs: 100,
+            stages: [
+                { target: 100, duration: '5s' },
+            ],
+            exec: 'load_homepage'
+        }
+        
+       
+    }
+};
+
+const BASE_URL = "https://example.au";
+const USERNAME = "abc";
+const PASSWORD = "12345";
+const AUTH_HEADER = { headers: { "Authorization": `Basic ${toBase64(`${USERNAME}:${PASSWORD}`)}` } };
+
+export function load_homepage() {
+    let res = http.get(`${BASE_URL}/landing`, AUTH_HEADER);
+    check(res, { "Homepage loaded successfully": (r) => r.status === 200 });
+    sleep(1);
+}
+
+export function load_address() {
+    let searchRes = http.get(`${BASE_URL}/api/geoscape/autocomplete?query=${encodeURIComponent("8 Havana Street")}`, AUTH_HEADER);
+    check(searchRes, { "Search function works correctly": (r) => r.status === 200 });
+
+    if (searchRes.status === 200) {
+        let suggestions = searchRes.json()?.data?.suggest || [];
+        if (suggestions.length > 0) {
+            let firstAddress = suggestions[0].address || "NO_ADDRESS";
+            let geoRes = http.get(`${BASE_URL}/api/google/address-geodata?address=${encodeURIComponent(firstAddress)}`, AUTH_HEADER);
+            check(geoRes, { "Geolocation retrieved successfully": (r) => r.status === 200 });
+
+            if (geoRes.status === 200) {
+                let reportRes = http.get(`${BASE_URL}/report`, AUTH_HEADER);
+                check(reportRes, { "📄 Report is available": (r) => r.status === 200 });
+            }
+        }
+    }
+    sleep(1);
+}
